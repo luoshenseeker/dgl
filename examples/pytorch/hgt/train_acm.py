@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+
 # coding: utf-8
 
 # In[1]:
@@ -9,16 +9,47 @@ import urllib.request
 import dgl
 import math
 import numpy as np
+import scipy.sparse
 from model import *
 import argparse
+import pickle
 
 torch.manual_seed(0)
 data_url = 'https://data.dgl.ai/dataset/ACM.mat'
-data_file_path = '/tmp/ACM.mat'
+data_file_path = './ACM.mat'
 
-urllib.request.urlretrieve(data_url, data_file_path)
-data = scipy.io.loadmat(data_file_path)
+run_my_code = True
 
+# urllib.request.urlretrieve(data_url, data_file_path)
+
+
+if run_my_code:
+    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\data_dict_sparse_update.pkl", "rb") as f:
+        data_dict_sparse = pickle.load(f)
+
+    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\matrix_data_have_node.pkl", "rb") as f:
+        matrix_data_have_node = pickle.load(f)
+
+    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\ipaddress_dict.pkl", "rb") as f:
+        ipaddress_dict = pickle.load(f)
+
+    graph_num = '7'
+    label_num = '8'
+
+    rows = np.array(data_dict_sparse[graph_num][0])
+    cols = np.array(data_dict_sparse[graph_num][1])
+    values = np.array(data_dict_sparse[graph_num][2])
+
+    sparseM_v = scipy.sparse.coo_matrix((values, (rows, cols)))
+
+    rows_date  = np.array(matrix_data_have_node[0]) - 1
+    cols_date  = np.array(matrix_data_have_node[1])
+    values_date = np.array(matrix_data_have_node[2])
+
+    sparseM_date = scipy.sparse.coo_matrix((values_date, (rows_date, cols_date)))
+else:
+    data = scipy.io.loadmat(data_file_path)
+#TODO: recover time stamp
 
 parser = argparse.ArgumentParser(description='Training GNN on ogbn-products benchmark')
 
@@ -47,7 +78,10 @@ def train(model, G):
     train_step = torch.tensor(0)
     for epoch in np.arange(args.n_epoch) + 1:
         model.train()
-        logits = model(G, 'paper')
+        if run_my_code:
+            logits = model(G, 'date')
+        else:
+            logits = model(G, 'paper')
         # The loss is computed only for labeled nodes.
         loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
         optimizer.zero_grad()
@@ -58,7 +92,10 @@ def train(model, G):
         scheduler.step(train_step)
         if epoch % 5 == 0:
             model.eval()
-            logits = model(G, 'paper')
+            if run_my_code:
+                logits = model(G, 'date')
+            else:
+                logits = model(G, 'paper')
             pred   = logits.argmax(1).cpu()
             train_acc = (pred[train_idx] == labels[train_idx]).float().mean()
             val_acc   = (pred[val_idx]   == labels[val_idx]).float().mean()
@@ -79,21 +116,42 @@ def train(model, G):
 
 device = torch.device("cuda:0")
 
-G = dgl.heterograph({
-        ('paper', 'written-by', 'author') : data['PvsA'].nonzero(),
-        ('author', 'writing', 'paper') : data['PvsA'].transpose().nonzero(),
-        ('paper', 'citing', 'paper') : data['PvsP'].nonzero(),
-        ('paper', 'cited', 'paper') : data['PvsP'].transpose().nonzero(),
-        ('paper', 'is-about', 'subject') : data['PvsL'].nonzero(),
-        ('subject', 'has', 'paper') : data['PvsL'].transpose().nonzero(),
-    })
-print(G)
+if run_my_code:
+    G = dgl.heterograph({
+            ('node', 'forward-relation', 'node') : sparseM_v.nonzero(),
+            ('node', 'backward-relation', 'node') : sparseM_v.transpose().nonzero(),
+            ('date', 'have-node', 'node') : sparseM_date.nonzero(),
+            ('node', 'in-date', 'date') : sparseM_date.transpose().nonzero(),
+        })
+    print(G)
+else:
+    G = dgl.heterograph({
+            ('paper', 'written-by', 'author') : data['PvsA'].nonzero(),
+            ('author', 'writing', 'paper') : data['PvsA'].transpose().nonzero(),
+            ('paper', 'citing', 'paper') : data['PvsP'].nonzero(),
+            ('paper', 'cited', 'paper') : data['PvsP'].transpose().nonzero(),
+            ('paper', 'is-about', 'subject') : data['PvsL'].nonzero(),
+            ('subject', 'has', 'paper') : data['PvsL'].transpose().nonzero(),
+        })
+    print(G)
 
-pvc = data['PvsC'].tocsr()
+if run_my_code:
+    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\matrix_label.pkl", "rb") as f:
+        matrix_label = pickle.load(f)
+    rows_label   = np.array(matrix_label[1])
+    cols_label   = np.array(matrix_label[0])
+    values_label = np.array(matrix_label[2])
+
+    sparseM_label = scipy.sparse.coo_matrix((values_label, (rows_label, cols_label)))
+    pvc = sparseM_label.tocsr()
+else:
+    pvc = data['PvsC'].tocsr()
 p_selected = pvc.tocoo()
 # generate labels
 labels = pvc.indices
 labels = torch.tensor(labels).long()
+
+
 
 # generate train/val/test split
 pid = p_selected.row
@@ -134,25 +192,25 @@ train(model, G)
 
 
 
-model = HeteroRGCN(G,
-                   in_size=args.n_inp,
-                   hidden_size=args.n_hid,
-                   out_size=labels.max().item()+1).to(device)
-optimizer = torch.optim.AdamW(model.parameters())
-scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, total_steps=args.n_epoch, max_lr = args.max_lr)
-print('Training RGCN with #param: %d' % (get_n_params(model)))
-train(model, G)
+# model = HeteroRGCN(G,
+#                    in_size=args.n_inp,
+#                    hidden_size=args.n_hid,
+#                    out_size=labels.max().item()+1).to(device)
+# optimizer = torch.optim.AdamW(model.parameters())
+# scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, total_steps=args.n_epoch, max_lr = args.max_lr)
+# print('Training RGCN with #param: %d' % (get_n_params(model)))
+# train(model, G)
 
 
 
-model = HGT(G,
-            node_dict, edge_dict,
-            n_inp=args.n_inp,
-            n_hid=args.n_hid,
-            n_out=labels.max().item()+1,
-            n_layers=0,
-            n_heads=4).to(device)
-optimizer = torch.optim.AdamW(model.parameters())
-scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, total_steps=args.n_epoch, max_lr = args.max_lr)
-print('Training MLP with #param: %d' % (get_n_params(model)))
-train(model, G)
+# model = HGT(G,
+#             node_dict, edge_dict,
+#             n_inp=args.n_inp,
+#             n_hid=args.n_hid,
+#             n_out=labels.max().item()+1,
+#             n_layers=0,
+#             n_heads=4).to(device)
+# optimizer = torch.optim.AdamW(model.parameters())
+# scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, total_steps=args.n_epoch, max_lr = args.max_lr)
+# print('Training MLP with #param: %d' % (get_n_params(model)))
+# train(model, G)
