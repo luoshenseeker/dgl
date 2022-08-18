@@ -21,19 +21,29 @@ data_file_path = './ACM.mat'
 run_my_code = True
 
 # urllib.request.urlretrieve(data_url, data_file_path)
+import platform
 
+sysstr = platform.system()
+if sysstr == "Linux":
+    # paths
+    data_path = "/home/zhouxk/data/"
+elif sysstr == "Windows":
+    # paths
+    data_path = "C:\\Users\\luoshenseeker\\home\\work\\科研\\workbentch\\misc\\data\\data_with_label\\"
+else:
+    data_path = "/home/zhouxk/data/"
 
 if run_my_code:
-    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\data_dict_sparse_update.pkl", "rb") as f:
+    with open(f"{data_path}data_dict_sparse_update.pkl", "rb") as f:
         data_dict_sparse = pickle.load(f)
 
-    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\matrix_data_have_node.pkl", "rb") as f:
+    with open(f"{data_path}matrix_data_have_node.pkl", "rb") as f:
         matrix_data_have_node = pickle.load(f)
 
-    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\ipaddress_dict.pkl", "rb") as f:
+    with open(f"{data_path}ipaddress_dict.pkl", "rb") as f:
         ipaddress_dict = pickle.load(f)
 
-    graph_num = '7'
+    graph_num = '1'
     label_num = '8'
 
     rows = np.array(data_dict_sparse[graph_num][0])
@@ -136,7 +146,7 @@ else:
     print(G)
 
 if run_my_code:
-    with open(r"C:\Users\luoshenseeker\home\work\科研\workbentch\misc\data\data_with_label\matrix_label.pkl", "rb") as f:
+    with open(f"{data_path}matrix_label.pkl", "rb") as f:
         matrix_label = pickle.load(f)
     rows_label   = np.array(matrix_label[1])
     cols_label   = np.array(matrix_label[0])
