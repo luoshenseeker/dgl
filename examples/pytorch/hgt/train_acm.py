@@ -43,18 +43,24 @@ if run_my_code:
     with open(f"{data_path}ipaddress_dict.pkl", "rb") as f:
         ipaddress_dict = pickle.load(f)
 
-    graph_num = '1'
-    label_num = '8'
+    predict_days = 1
+    graph_num = 8
+    label_num = graph_num + predict_days
 
-    rows = np.array(data_dict_sparse[graph_num][0])
-    cols = np.array(data_dict_sparse[graph_num][1])
-    values = np.array(data_dict_sparse[graph_num][2])
+    rows = np.array(data_dict_sparse[str(graph_num)][0])
+    cols = np.array(data_dict_sparse[str(graph_num)][1])
+    values = np.array(data_dict_sparse[str(graph_num)][2])
 
     sparseM_v = scipy.sparse.coo_matrix((values, (rows, cols)))
 
-    rows_date  = np.array(matrix_data_have_node[0]) - 1
-    cols_date  = np.array(matrix_data_have_node[1])
-    values_date = np.array(matrix_data_have_node[2])
+    label_position = 0
+    for idx, date in enumerate(matrix_data_have_node[0]):
+        if date > label_num:
+            label_position = idx
+            break
+    rows_date  = np.array(matrix_data_have_node[0][:label_position]) - 1
+    cols_date  = np.array(matrix_data_have_node[1][:label_position])
+    values_date = np.array(matrix_data_have_node[2][:label_position])
 
     sparseM_date = scipy.sparse.coo_matrix((values_date, (rows_date, cols_date)))
 else:
@@ -90,10 +96,12 @@ def train(model, G):
         model.train()
         if run_my_code:
             logits = model(G, 'date')
+            # loss = F.cross_entropy(logits.view(-1)[train_idx], labels[train_idx].to(device))
+            loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
         else:
             logits = model(G, 'paper')
+            loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
         # The loss is computed only for labeled nodes.
-        loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -148,9 +156,9 @@ else:
 if run_my_code:
     with open(f"{data_path}matrix_label.pkl", "rb") as f:
         matrix_label = pickle.load(f)
-    rows_label   = np.array(matrix_label[1])
-    cols_label   = np.array(matrix_label[0])
-    values_label = np.array(matrix_label[2])
+    rows_label   = np.array(matrix_label[1][:label_num])
+    cols_label   = np.array(matrix_label[0][:label_num]) - 1
+    values_label = np.array(matrix_label[2][:label_num])
 
     sparseM_label = scipy.sparse.coo_matrix((values_label, (rows_label, cols_label)))
     pvc = sparseM_label.tocsr()
@@ -162,13 +170,21 @@ labels = pvc.indices
 labels = torch.tensor(labels).long()
 
 
+if run_my_code:
+    # generate train/val/test split
+    pid = p_selected.col
+    shuffle = np.random.permutation(pid)
+    train_idx = torch.tensor(shuffle[:-1]).long()
+    val_idx = torch.tensor(shuffle[-4:-3]).long()
+    test_idx = torch.tensor(shuffle[-3:]).long()
+else:
+    # generate train/val/test split
+    pid = p_selected.row
+    shuffle = np.random.permutation(pid)
+    train_idx = torch.tensor(shuffle[0:800]).long()
+    val_idx = torch.tensor(shuffle[800:900]).long()
+    test_idx = torch.tensor(shuffle[900:]).long()
 
-# generate train/val/test split
-pid = p_selected.row
-shuffle = np.random.permutation(pid)
-train_idx = torch.tensor(shuffle[0:800]).long()
-val_idx = torch.tensor(shuffle[800:900]).long()
-test_idx = torch.tensor(shuffle[900:]).long()
 
 node_dict = {}
 edge_dict = {}

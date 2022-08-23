@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import dgl.function as fn
 from dgl.nn.functional import edge_softmax
+import humanize
 
 class HGTLayer(nn.Module):
     def __init__(self,
@@ -128,8 +129,11 @@ class HGT(nn.Module):
         for ntype in G.ntypes:
             n_id = self.node_dict[ntype]
             h[ntype] = F.gelu(self.adapt_ws[n_id](G.nodes[ntype].data['inp']))
+            # print(G.nodes[ntype].data['inp'].size())
+            # print("1:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0), binary=True)))
         for i in range(self.n_layers):
             h = self.gcs[i](G, h)
+            # print("2:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0), binary=True)))
         return self.out(h[out_key])
 
 class HeteroRGCNLayer(nn.Module):
