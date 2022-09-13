@@ -75,7 +75,11 @@ parser.add_argument('--n_epoch', type=int, default=200)
 parser.add_argument('--n_hid',   type=int, default=256)
 parser.add_argument('--n_inp',   type=int, default=256)
 parser.add_argument('--clip',    type=int, default=1.0) 
-parser.add_argument('--max_lr',  type=float, default=1e-3) 
+# parser.add_argument('--max_lr',  type=float, default=1e-3) 
+if run_my_code:
+    parser.add_argument('--max_lr',  type=float, default=1e-1) 
+else:
+    parser.add_argument('--max_lr',  type=float, default=1e-3) 
 
 args = parser.parse_args()
 
@@ -88,6 +92,8 @@ def get_n_params(model):
         pp += nn
     return pp
 
+loss_func = nn.MSELoss()
+
 def train(model, G):
     best_val_acc = torch.tensor(0)
     best_test_acc = torch.tensor(0)
@@ -97,10 +103,12 @@ def train(model, G):
         if run_my_code:
             logits = model(G, 'date')
             # loss = F.cross_entropy(logits.view(-1)[train_idx], labels[train_idx].to(device))
-            loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
+            # loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
+            loss = loss_func(logits[train_idx], labels[train_idx].to(device))
         else:
             logits = model(G, 'paper')
             loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
+            # loss = torch.nn.MSELoss(logits[train_idx], labels[train_idx].to(device))
         # The loss is computed only for labeled nodes.
         optimizer.zero_grad()
         loss.backward()
@@ -115,7 +123,8 @@ def train(model, G):
             else:
                 logits = model(G, 'paper')
             pred   = logits.argmax(1).cpu()
-            train_acc = (pred[train_idx] == labels[train_idx]).float().mean()
+            print(logits, labels)
+            train_acc = (pred[train_idx] == labels[train_idx]).float().mean() ##TODO: metrics
             val_acc   = (pred[val_idx]   == labels[val_idx]).float().mean()
             test_acc  = (pred[test_idx]  == labels[test_idx]).float().mean()
             if best_val_acc < val_acc:
@@ -156,8 +165,8 @@ else:
 if run_my_code:
     with open(f"{data_path}matrix_label.pkl", "rb") as f:
         matrix_label = pickle.load(f)
-    rows_label   = np.array(matrix_label[1][:label_num])
-    cols_label   = np.array(matrix_label[0][:label_num]) - 1
+    rows_label   = np.array(matrix_label[0][:label_num]) - 1
+    cols_label   = np.array(matrix_label[1][:label_num])
     values_label = np.array(matrix_label[2][:label_num])
 
     sparseM_label = scipy.sparse.coo_matrix((values_label, (rows_label, cols_label)))
@@ -167,16 +176,22 @@ else:
 p_selected = pvc.tocoo()
 # generate labels
 labels = pvc.indices
-labels = torch.tensor(labels).long()
-
+if run_my_code:
+    labels = torch.tensor(labels).float()
+else:
+    labels = torch.tensor(labels).long()
 
 if run_my_code:
     # generate train/val/test split
-    pid = p_selected.col
+    # pid = p_selected.col
+    pid = np.array(range(label_num))
     shuffle = np.random.permutation(pid)
-    train_idx = torch.tensor(shuffle[:-1]).long()
-    val_idx = torch.tensor(shuffle[-4:-3]).long()
-    test_idx = torch.tensor(shuffle[-3:]).long()
+    # train_idx = torch.tensor(shuffle[:-1]).long()
+    # val_idx = torch.tensor(shuffle[-4:-3]).long()
+    # test_idx = torch.tensor(shuffle[-3:]).long()
+    train_idx = pid
+    val_idx = pid
+    test_idx = pid
 else:
     # generate train/val/test split
     pid = p_selected.row
@@ -206,7 +221,8 @@ model = HGT(G,
             node_dict, edge_dict,
             n_inp=args.n_inp,
             n_hid=args.n_hid,
-            n_out=labels.max().item()+1,
+            # n_out=labels.max().item()+1,  ## target bug point
+            n_out=label_num,  ## target bug point
             n_layers=2,
             n_heads=4,
             use_norm = True).to(device)
