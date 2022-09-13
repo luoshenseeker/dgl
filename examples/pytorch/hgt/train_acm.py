@@ -14,6 +14,8 @@ from model import *
 import argparse
 import pickle
 from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.metrics import r2_score
+
 
 torch.manual_seed(0)
 data_url = 'https://data.dgl.ai/dataset/ACM.mat'
@@ -124,11 +126,15 @@ def train(model, G):
             else:
                 logits = model(G, 'paper')
             test_metricses = []
+            r2_scores = []
             for i in range(len(logits)):
                 test_metrics = mean_absolute_percentage_error(labels, logits[i].cpu().detach().numpy())
+                r2_score_single = r2_score(labels, logits[i].cpu().detach().numpy())
                 # print(test_metrics)
                 test_metricses.append(test_metrics)
+                r2_scores.append(r2_score_single)
             test_metrics = np.mean(test_metricses)
+            r2_score_single = np.mean(r2_scores)
             # print("mean:", test_metrics)
             # pred   = logits.argmax(1).cpu()
             # print(logits, labels)
@@ -138,11 +144,12 @@ def train(model, G):
             # if best_val_acc < val_acc:
             #     best_val_acc = val_acc
             #     best_test_acc = test_acc
-            print('Epoch: %d LR: %.5f Loss %.4f, MAPE %.4f' % (
+            print('Epoch: %d LR: %.5f Loss %.4f, MAPE %.4f, R2 %.4f' % (
                 epoch,
                 optimizer.param_groups[0]['lr'], 
                 loss.item(),
-                test_metrics
+                test_metrics,
+                r2_score_single
             ))
 
 device = torch.device("cuda:0")
