@@ -13,6 +13,7 @@ import scipy.sparse
 from model import *
 import argparse
 import pickle
+from sklearn.metrics import mean_absolute_percentage_error
 
 torch.manual_seed(0)
 data_url = 'https://data.dgl.ai/dataset/ACM.mat'
@@ -122,23 +123,26 @@ def train(model, G):
                 logits = model(G, 'date')
             else:
                 logits = model(G, 'paper')
-            pred   = logits.argmax(1).cpu()
-            print(logits, labels)
-            train_acc = (pred[train_idx] == labels[train_idx]).float().mean() ##TODO: metrics
-            val_acc   = (pred[val_idx]   == labels[val_idx]).float().mean()
-            test_acc  = (pred[test_idx]  == labels[test_idx]).float().mean()
-            if best_val_acc < val_acc:
-                best_val_acc = val_acc
-                best_test_acc = test_acc
-            print('Epoch: %d LR: %.5f Loss %.4f, Train Acc %.4f, Val Acc %.4f (Best %.4f), Test Acc %.4f (Best %.4f)' % (
+            test_metricses = []
+            for i in range(len(logits)):
+                test_metrics = mean_absolute_percentage_error(labels, logits[i].cpu().detach().numpy())
+                # print(test_metrics)
+                test_metricses.append(test_metrics)
+            test_metrics = np.mean(test_metricses)
+            # print("mean:", test_metrics)
+            # pred   = logits.argmax(1).cpu()
+            # print(logits, labels)
+            # train_acc = (pred[train_idx] == labels[train_idx]).float().mean() ##TODO: metrics
+            # val_acc   = (pred[val_idx]   == labels[val_idx]).float().mean()
+            # test_acc  = (pred[test_idx]  == labels[test_idx]).float().mean()
+            # if best_val_acc < val_acc:
+            #     best_val_acc = val_acc
+            #     best_test_acc = test_acc
+            print('Epoch: %d LR: %.5f Loss %.4f, MAPE %.4f' % (
                 epoch,
                 optimizer.param_groups[0]['lr'], 
                 loss.item(),
-                train_acc.item(),
-                val_acc.item(),
-                best_val_acc.item(),
-                test_acc.item(),
-                best_test_acc.item(),
+                test_metrics
             ))
 
 device = torch.device("cuda:0")
