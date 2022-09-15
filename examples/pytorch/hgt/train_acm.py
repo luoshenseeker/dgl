@@ -16,6 +16,10 @@ import pickle
 from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.metrics import r2_score
 
+def save_pkl(dictionnary, directory, file_name):
+    """Save the dictionnary in the directory under the file_name with pickle"""
+    with open(f"output/{directory}/{file_name}.pkl", "wb") as output:
+        pickle.dump(dictionnary, output)
 
 torch.manual_seed(0)
 data_url = 'https://data.dgl.ai/dataset/ACM.mat'
@@ -85,6 +89,7 @@ else:
     parser.add_argument('--max_lr',  type=float, default=1e-3) 
 
 args = parser.parse_args()
+filename = f"lr{args.max_lr}_n{args.n_epoch}"
 
 def get_n_params(model):
     pp=0
@@ -101,6 +106,8 @@ def train(model, G):
     best_val_acc = torch.tensor(0)
     best_test_acc = torch.tensor(0)
     train_step = torch.tensor(0)
+    mape_hist = []
+    r2_hist = []
     for epoch in np.arange(args.n_epoch) + 1:
         model.train()
         if run_my_code:
@@ -119,7 +126,7 @@ def train(model, G):
         optimizer.step()
         train_step += 1
         scheduler.step(train_step)
-        if epoch % 5 == 0:
+        if epoch % 1 == 0:
             model.eval()
             if run_my_code:
                 logits = model(G, 'date')
@@ -132,8 +139,11 @@ def train(model, G):
                 r2_score_single = r2_score(labels, logits[i].cpu().detach().numpy())
                 # print(test_metrics)
                 test_metricses.append(test_metrics)
+                mape_hist.append(test_metrics)
                 r2_scores.append(r2_score_single)
+                r2_hist.append(r2_score_single)
             test_metrics = np.mean(test_metricses)
+            
             r2_score_single = np.mean(r2_scores)
             # print("mean:", test_metrics)
             # pred   = logits.argmax(1).cpu()
@@ -151,6 +161,8 @@ def train(model, G):
                 test_metrics,
                 r2_score_single
             ))
+    save_pkl(mape_hist, "mape", filename)
+    save_pkl(r2_hist, "r2", filename)
 
 device = torch.device("cuda:0")
 
