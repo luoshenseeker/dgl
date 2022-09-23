@@ -26,6 +26,8 @@ data_url = 'https://data.dgl.ai/dataset/ACM.mat'
 data_file_path = './ACM.mat'
 
 run_my_code = True
+test_string = ""
+# test_string = "_test"  ## show test mode, affect the hist file name
 
 # urllib.request.urlretrieve(data_url, data_file_path)
 import platform
@@ -40,37 +42,73 @@ elif sysstr == "Windows":
 else:
     data_path = "/home/zhouxk/data/"
 
-if run_my_code:
-    with open(f"{data_path}data_dict_sparse_update.pkl", "rb") as f:
-        data_dict_sparse = pickle.load(f)
+with open(f"{data_path}data_dict_sparse_update.pkl", "rb") as f:
+    data_dict_sparse = pickle.load(f)
 
-    with open(f"{data_path}matrix_data_have_node.pkl", "rb") as f:
-        matrix_data_have_node = pickle.load(f)
+with open(f"{data_path}matrix_data_have_node.pkl", "rb") as f:
+    matrix_data_have_node = pickle.load(f)
 
-    with open(f"{data_path}ipaddress_dict.pkl", "rb") as f:
-        ipaddress_dict = pickle.load(f)
+with open(f"{data_path}ipaddress_dict.pkl", "rb") as f:
+    ipaddress_dict = pickle.load(f)
 
-    predict_days = 1
-    graph_num = 8
-    label_num = graph_num + predict_days
+with open(f"{data_path}matrix_label.pkl", "rb") as f:
+    matrix_label = pickle.load(f)
 
-    rows = np.array(data_dict_sparse[str(graph_num)][0])
-    cols = np.array(data_dict_sparse[str(graph_num)][1])
-    values = np.array(data_dict_sparse[str(graph_num)][2])
-
+def make_graph(start:int, end:int):
+    rows = []
+    cols = []
+    values = []
+    for i in range(start, end+1):
+        rows.extend(data_dict_sparse[str(i)][0])
+        cols.extend(data_dict_sparse[str(i)][1])
+        values.extend(data_dict_sparse[str(i)][2])
+    rows = np.array(rows)
+    cols = np.array(cols)
+    values = np.array(values)
     sparseM_v = scipy.sparse.coo_matrix((values, (rows, cols)))
 
-    label_position = 0
-    for idx, date in enumerate(matrix_data_have_node[0]):
-        if date > label_num:
-            label_position = idx
-            break
-    rows_date  = np.array(matrix_data_have_node[0][:label_position]) - 1
-    cols_date  = np.array(matrix_data_have_node[1][:label_position])
-    values_date = np.array(matrix_data_have_node[2][:label_position])
+    # label_position = 0
+    # for idx, date in enumerate(matrix_data_have_node[0]):
+    #     if date > label_num:
+    #         label_position = idx
+    #         break
+    # rows_date  = np.array(matrix_data_have_node[0][:label_position]) - 1
+    # cols_date  = np.array(matrix_data_have_node[1][:label_position])
+    # values_date = np.array(matrix_data_have_node[2][:label_position])
 
-    sparseM_date = scipy.sparse.coo_matrix((values_date, (rows_date, cols_date)))
-else:
+    # sparseM_date = scipy.sparse.coo_matrix((values_date, (rows_date, cols_date)))
+    G = dgl.heterograph({
+        ('node', 'forward-relation', 'node') : sparseM_v.nonzero(),
+        ('node', 'backward-relation', 'node') : sparseM_v.transpose().nonzero(),
+        # ('date', 'have-node', 'node') : sparseM_date.nonzero(),
+        # ('node', 'in-date', 'date') : sparseM_date.transpose().nonzero(),
+    })
+    print(G)
+
+    global node_dict
+    global edge_dict
+    node_dict = {}
+    edge_dict = {}
+
+    for ntype in G.ntypes:
+        node_dict[ntype] = len(node_dict)
+    for etype in G.etypes:
+        edge_dict[etype] = len(edge_dict)
+        G.edges[etype].data['id'] = torch.ones(G.number_of_edges(etype), dtype=torch.long) * edge_dict[etype] 
+
+    #     Random initialize input feature
+    for ntype in G.ntypes:
+        emb = nn.Parameter(torch.Tensor(G.number_of_nodes(ntype), 256), requires_grad = False)
+        nn.init.xavier_uniform_(emb)
+        G.nodes[ntype].data['inp'] = emb
+
+    G = G.to(device)
+
+    labels = matrix_label[1][start - 1:end]
+    labels = torch.tensor(labels).float()
+    return [G, labels]
+
+if not run_my_code:
     data = scipy.io.loadmat(data_file_path)
 #TODO: recover time stamp
 
@@ -84,12 +122,14 @@ parser.add_argument('--n_inp',   type=int, default=256)
 parser.add_argument('--clip',    type=int, default=1.0) 
 # parser.add_argument('--max_lr',  type=float, default=1e-3) 
 if run_my_code:
-    parser.add_argument('--max_lr',  type=float, default=1e-1) 
+    parser.add_argument('--max_lr',  type=float, default=1) 
 else:
     parser.add_argument('--max_lr',  type=float, default=1e-3) 
 
 args = parser.parse_args()
-filename = f"lr{args.max_lr}_n{args.n_epoch}"
+filename = f"lr{args.max_lr}_n{args.n_epoch}{test_string}"
+filename_test = f"test_lr{args.max_lr}_n{args.n_epoch}{test_string}"
+filename_val = f"val_lr{args.max_lr}_n{args.n_epoch}{test_string}"
 
 def get_n_params(model):
     pp=0
@@ -102,78 +142,93 @@ def get_n_params(model):
 
 loss_func = nn.MSELoss()
 
-def train(model, G):
+def train(model, train_set, test_set, val_set):
     best_val_acc = torch.tensor(0)
     best_test_acc = torch.tensor(0)
     train_step = torch.tensor(0)
     mape_hist = []
     r2_hist = []
+    mape_val_hist = []
+    r2_val_hist = []
     for epoch in np.arange(args.n_epoch) + 1:
         model.train()
-        if run_my_code:
-            logits = model(G, 'date')
-            # loss = F.cross_entropy(logits.view(-1)[train_idx], labels[train_idx].to(device))
-            # loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
-            loss = loss_func(logits[train_idx], labels[train_idx].to(device))
-        else:
-            logits = model(G, 'paper')
-            loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
-            # loss = torch.nn.MSELoss(logits[train_idx], labels[train_idx].to(device))
-        # The loss is computed only for labeled nodes.
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        optimizer.step()
-        train_step += 1
-        scheduler.step(train_step)
-        if epoch % 1 == 0:
-            model.eval()
+        for batch in train_set:
+            input = batch[0]
+            labels = batch[1]
             if run_my_code:
-                logits = model(G, 'date')
+                # logits = model(G, 'date')
+                logits = model(input, 'node')
+                # loss = F.cross_entropy(logits.view(-1)[train_idx], labels[train_idx].to(device))
+                # loss = F.cross_entropy(logits[train_idx], labels[train_idx].to(device))
+                loss = loss_func(logits, labels.to(device))
             else:
                 logits = model(G, 'paper')
+                loss = F.cross_entropy(input, labels.to(device))
+                # loss = torch.nn.MSELoss(logits[train_idx], labels[train_idx].to(device))
+            # The loss is computed only for labeled nodes.
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            optimizer.step()
+            print("1:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
+        train_step += 1
+        scheduler.step(train_step)
+        torch.cuda.empty_cache()
+        if epoch % 1 == 0:
+            model.eval()
+            test_input = test_set[0]
+            test_label = test_set[1]
+            logits = model(test_input, 'node')
+            print("2:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
             test_metricses = []
             r2_scores = []
             for i in range(len(logits)):
-                test_metrics = mean_absolute_percentage_error(labels, logits[i].cpu().detach().numpy())
-                r2_score_single = r2_score(labels, logits[i].cpu().detach().numpy())
+                mape_score = mean_absolute_percentage_error(test_label, logits[i].cpu().detach().numpy())
+                r2_score_single = r2_score(test_label, logits[i].cpu().detach().numpy())
                 # print(test_metrics)
-                test_metricses.append(test_metrics)
-                mape_hist.append(test_metrics)
+                test_metricses.append(mape_score)
+                mape_hist.append(mape_score)
                 r2_scores.append(r2_score_single)
                 r2_hist.append(r2_score_single)
-            test_metrics = np.mean(test_metricses)
-            
-            r2_score_single = np.mean(r2_scores)
-            # print("mean:", test_metrics)
-            # pred   = logits.argmax(1).cpu()
-            # print(logits, labels)
-            # train_acc = (pred[train_idx] == labels[train_idx]).float().mean() ##TODO: metrics
-            # val_acc   = (pred[val_idx]   == labels[val_idx]).float().mean()
-            # test_acc  = (pred[test_idx]  == labels[test_idx]).float().mean()
-            # if best_val_acc < val_acc:
-            #     best_val_acc = val_acc
-            #     best_test_acc = test_acc
-            print('Epoch: %d LR: %.5f Loss %.4f, MAPE %.4f, R2 %.4f' % (
+            mape_score_test = np.mean(test_metricses)            
+            r2_score_single_test = np.mean(r2_scores)
+            torch.cuda.empty_cache()
+
+            val_input = val_set[0]
+            val_label = val_set[1]
+            logits = model(val_input, 'node')
+            print("3:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
+            test_metricses = []
+            r2_scores = []
+            for i in range(len(logits)):
+                mape_score = mean_absolute_percentage_error(val_label, logits[i].cpu().detach().numpy())
+                r2_score_single = r2_score(val_label, logits[i].cpu().detach().numpy())
+                # print(test_metrics)
+                test_metricses.append(mape_score)
+                mape_val_hist.append(mape_score)
+                r2_scores.append(r2_score_single)
+                r2_val_hist.append(r2_score_single)
+            mape_score_val = np.mean(test_metricses)            
+            r2_score_single_val = np.mean(r2_scores)
+            print('Epoch: %d LR: %.5f Loss %.4f, testMAPE %.4f, testR2 %.4f, valMAPE %.4f, valR2 %.4f' % (
                 epoch,
                 optimizer.param_groups[0]['lr'], 
                 loss.item(),
-                test_metrics,
-                r2_score_single
+                mape_score_test,
+                r2_score_single_test,
+                mape_score_val,
+                r2_score_single_val,
             ))
-    save_pkl(mape_hist, "mape", filename)
-    save_pkl(r2_hist, "r2", filename)
+            torch.cuda.empty_cache()
+    save_pkl(mape_hist, "mape", filename_test)
+    save_pkl(r2_hist, "r2", filename_test)
+    save_pkl(mape_val_hist, "mape", filename_val)
+    save_pkl(r2_val_hist, "r2", filename_val)
 
 device = torch.device("cuda:0")
 
 if run_my_code:
-    G = dgl.heterograph({
-            ('node', 'forward-relation', 'node') : sparseM_v.nonzero(),
-            ('node', 'backward-relation', 'node') : sparseM_v.transpose().nonzero(),
-            ('date', 'have-node', 'node') : sparseM_date.nonzero(),
-            ('node', 'in-date', 'date') : sparseM_date.transpose().nonzero(),
-        })
-    print(G)
+    pass
 else:
     G = dgl.heterograph({
             ('paper', 'written-by', 'author') : data['PvsA'].nonzero(),
@@ -186,73 +241,50 @@ else:
     print(G)
 
 if run_my_code:
-    with open(f"{data_path}matrix_label.pkl", "rb") as f:
-        matrix_label = pickle.load(f)
-    rows_label   = np.array(matrix_label[0][:label_num]) - 1
-    cols_label   = np.array(matrix_label[1][:label_num])
-    values_label = np.array(matrix_label[2][:label_num])
-
-    sparseM_label = scipy.sparse.coo_matrix((values_label, (rows_label, cols_label)))
-    pvc = sparseM_label.tocsr()
+    pass
 else:
     pvc = data['PvsC'].tocsr()
-p_selected = pvc.tocoo()
-# generate labels
-labels = pvc.indices
-if run_my_code:
-    labels = torch.tensor(labels).float()
-else:
-    labels = torch.tensor(labels).long()
+# p_selected = pvc.tocoo()
+# # generate labels
+# labels = pvc.indices
+# if run_my_code:
+#     pass
+#     # labels = torch.tensor(labels).float()
+# else:
+#     labels = torch.tensor(labels).long()
 
-if run_my_code:
-    # generate train/val/test split
-    # pid = p_selected.col
-    pid = np.array(range(label_num))
-    shuffle = np.random.permutation(pid)
-    # train_idx = torch.tensor(shuffle[:-1]).long()
-    # val_idx = torch.tensor(shuffle[-4:-3]).long()
-    # test_idx = torch.tensor(shuffle[-3:]).long()
-    train_idx = pid
-    val_idx = pid
-    test_idx = pid
-else:
-    # generate train/val/test split
-    pid = p_selected.row
-    shuffle = np.random.permutation(pid)
-    train_idx = torch.tensor(shuffle[0:800]).long()
-    val_idx = torch.tensor(shuffle[800:900]).long()
-    test_idx = torch.tensor(shuffle[900:]).long()
+# if run_my_code:
+#     pass
+# else:
+#     # generate train/val/test split
+#     pid = p_selected.row
+#     shuffle = np.random.permutation(pid)
+#     train_idx = torch.tensor(shuffle[0:800]).long()
+#     val_idx = torch.tensor(shuffle[800:900]).long()
+#     test_idx = torch.tensor(shuffle[900:]).long()
 
+train_set = [
+    make_graph(1, 7), 
+    make_graph(2, 8),
+    make_graph(3, 9),
+    make_graph(4, 10),
+    make_graph(5, 11)]
+test_set = make_graph(2, 8)
+val_set = make_graph(6, 12)
 
-node_dict = {}
-edge_dict = {}
-for ntype in G.ntypes:
-    node_dict[ntype] = len(node_dict)
-for etype in G.etypes:
-    edge_dict[etype] = len(edge_dict)
-    G.edges[etype].data['id'] = torch.ones(G.number_of_edges(etype), dtype=torch.long) * edge_dict[etype] 
-
-#     Random initialize input feature
-for ntype in G.ntypes:
-    emb = nn.Parameter(torch.Tensor(G.number_of_nodes(ntype), 256), requires_grad = False)
-    nn.init.xavier_uniform_(emb)
-    G.nodes[ntype].data['inp'] = emb
-
-G = G.to(device)
-
-model = HGT(G,
+model = HGT(train_set[0][0],
             node_dict, edge_dict,
             n_inp=args.n_inp,
             n_hid=args.n_hid,
             # n_out=labels.max().item()+1,  ## target bug point
-            n_out=label_num,  ## target bug point
+            n_out=7,  ## target bug point
             n_layers=2,
             n_heads=4,
             use_norm = True).to(device)
 optimizer = torch.optim.AdamW(model.parameters())
 scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, total_steps=args.n_epoch, max_lr = args.max_lr)
 print('Training HGT with #param: %d' % (get_n_params(model)))
-train(model, G)
+train(model, train_set, test_set, val_set)
 
 
 
