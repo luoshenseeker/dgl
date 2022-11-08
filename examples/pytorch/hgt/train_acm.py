@@ -143,15 +143,15 @@ def get_n_params(model):
 loss_func = nn.MSELoss()
 
 def train(model, train_set, test_set, val_set):
-    best_val_acc = torch.tensor(0)
-    best_test_acc = torch.tensor(0)
     train_step = torch.tensor(0)
     mape_hist = []
     r2_hist = []
     mape_val_hist = []
     r2_val_hist = []
+    loss_hist = []
     for epoch in np.arange(args.n_epoch) + 1:
         model.train()
+        loss_single = 0
         for batch in train_set:
             input = batch[0]
             labels = batch[1]
@@ -170,8 +170,10 @@ def train(model, train_set, test_set, val_set):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
+            loss_single += loss.item()
             print("1:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
         train_step += 1
+        loss_hist.append(loss_single / len(train_set))
         scheduler.step(train_step)
         torch.cuda.empty_cache()
         if epoch % 1 == 0:
@@ -224,6 +226,7 @@ def train(model, train_set, test_set, val_set):
     save_pkl(r2_hist, "r2", filename_test)
     save_pkl(mape_val_hist, "mape", filename_val)
     save_pkl(r2_val_hist, "r2", filename_val)
+    save_pkl(loss_hist, "loss", filename)
 
 device = torch.device("cuda:0")
 
