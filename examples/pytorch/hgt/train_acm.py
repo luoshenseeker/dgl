@@ -149,6 +149,10 @@ def train(model, train_set, test_set, val_set):
     mape_val_hist = []
     r2_val_hist = []
     loss_hist = []
+    tot_mape_hist = []
+    tot_r2_hist = []
+    tot_mape_val_hist = []
+    tot_r2_val_hist = []
     for epoch in np.arange(args.n_epoch) + 1:
         model.train()
         loss_single = 0
@@ -221,11 +225,15 @@ def train(model, train_set, test_set, val_set):
                 mape_score_val,
                 r2_score_single_val,
             ))
+            tot_mape_hist.append(mape_score_test)
+            tot_mape_val_hist.append(mape_score_val)
+            tot_r2_hist.append(r2_score_single_test)
+            tot_r2_val_hist.append(r2_score_single_val)
             torch.cuda.empty_cache()
-    save_pkl(mape_hist, "mape", filename_test)
-    save_pkl(r2_hist, "r2", filename_test)
-    save_pkl(mape_val_hist, "mape", filename_val)
-    save_pkl(r2_val_hist, "r2", filename_val)
+    save_pkl(tot_mape_hist, "mape", filename_test)
+    save_pkl(tot_mape_val_hist, "r2", filename_test)
+    save_pkl(tot_r2_hist, "mape", filename_val)
+    save_pkl(tot_r2_val_hist, "r2", filename_val)
     save_pkl(loss_hist, "loss", filename)
 
 device = torch.device("cuda:0")
