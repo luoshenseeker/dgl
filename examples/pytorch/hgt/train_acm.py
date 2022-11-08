@@ -181,25 +181,6 @@ def train(model, train_set, test_set, val_set):
         scheduler.step(train_step)
         torch.cuda.empty_cache()
         if epoch % 1 == 0:
-            model.eval()
-            test_input = test_set[0]
-            test_label = test_set[1]
-            logits = model(test_input, 'node')
-            print("2:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
-            test_metricses = []
-            r2_scores = []
-            for i in range(len(logits)):
-                mape_score = mean_absolute_percentage_error(test_label, logits[i].cpu().detach().numpy())
-                r2_score_single = r2_score(test_label, logits[i].cpu().detach().numpy())
-                # print(test_metrics)
-                test_metricses.append(mape_score)
-                mape_hist.append(mape_score)
-                r2_scores.append(r2_score_single)
-                r2_hist.append(r2_score_single)
-            mape_score_test = np.mean(test_metricses)            
-            r2_score_single_test = np.mean(r2_scores)
-            torch.cuda.empty_cache()
-
             val_input = val_set[0]
             val_label = val_set[1]
             logits = model(val_input, 'node')
@@ -216,20 +197,39 @@ def train(model, train_set, test_set, val_set):
                 r2_val_hist.append(r2_score_single)
             mape_score_val = np.mean(test_metricses)            
             r2_score_single_val = np.mean(r2_scores)
-            print('Epoch: %d LR: %.5f Loss %.4f, testMAPE %.4f, testR2 %.4f, valMAPE %.4f, valR2 %.4f' % (
+            print('Epoch: %d LR: %.5f Loss %.4f, valMAPE %.4f, valR2 %.4f' % (
                 epoch,
                 optimizer.param_groups[0]['lr'], 
                 loss.item(),
-                mape_score_test,
-                r2_score_single_test,
                 mape_score_val,
                 r2_score_single_val,
             ))
-            tot_mape_hist.append(mape_score_test)
             tot_mape_val_hist.append(mape_score_val)
-            tot_r2_hist.append(r2_score_single_test)
             tot_r2_val_hist.append(r2_score_single_val)
             torch.cuda.empty_cache()
+        
+        # test
+        model.eval()
+        test_input = test_set[0]
+        test_label = test_set[1]
+        logits = model(test_input, 'node')
+        print("2:{}".format(humanize.naturalsize(torch.cuda.memory_allocated(0))))
+        test_metricses = []
+        r2_scores = []
+        for i in range(len(logits)):
+            mape_score = mean_absolute_percentage_error(test_label, logits[i].cpu().detach().numpy())
+            r2_score_single = r2_score(test_label, logits[i].cpu().detach().numpy())
+            # print(test_metrics)
+            test_metricses.append(mape_score)
+            mape_hist.append(mape_score)
+            r2_scores.append(r2_score_single)
+            r2_hist.append(r2_score_single)
+        mape_score_test = np.mean(test_metricses)            
+        r2_score_single_test = np.mean(r2_scores)
+        torch.cuda.empty_cache()
+        tot_mape_hist.append(mape_score_test)
+        tot_r2_hist.append(r2_score_single_test)
+
     save_pkl(tot_mape_hist, "mape", filename_test)
     save_pkl(tot_mape_val_hist, "r2", filename_test)
     save_pkl(tot_r2_hist, "mape", filename_val)
