@@ -104,7 +104,7 @@ def make_graph(start:int, end:int):
 
     G = G.to(device)
 
-    labels = matrix_label[1][start - 1:end]
+    labels = matrix_label[1][end : end + 1]
     labels = torch.tensor(labels).float()
     return [G, labels]
 
@@ -280,8 +280,9 @@ train_set = [
     make_graph(3, 9),
     make_graph(4, 10),
     make_graph(5, 11)]
-test_set = make_graph(2, 8)
-val_set = make_graph(6, 12)
+test_set = make_graph(6, 12)
+# val_set = make_graph(6, 12)
+val_set = []
 
 model = HGT(train_set[0][0],
             node_dict, edge_dict,
